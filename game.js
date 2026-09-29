@@ -95,6 +95,7 @@ const GradeShader = {
 const grade = new ShaderPass(GradeShader);
 composer.addPass(grade);
 let caSpike = 0;    // extra chromatic aberration on crash, decays each frame
+let bloomPulse = 0; // short bloom boost on pickups, decays each frame
 
 // ---------------------------------------------------------------- lights
 scene.add(new THREE.AmbientLight(0x3a2458, 1.5));
@@ -462,6 +463,30 @@ function scrollStreaks(dz, speed) {
   streaks.instanceMatrix.needsUpdate = true;
 }
 
+// ---------------------------------------------------------------- ambient dust (depth haze)
+const DUST_N = 180;
+const dustPos = new Float32Array(DUST_N * 3);
+for (let i = 0; i < DUST_N; i++) {
+  dustPos[i * 3] = rand(6, 30) * (Math.random() < 0.5 ? -1 : 1);
+  dustPos[i * 3 + 1] = rand(0.2, 16);
+  dustPos[i * 3 + 2] = rand(-240, 8);
+}
+const dustGeo = new THREE.BufferGeometry();
+dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({
+  map: starTex, size: 0.16, color: 0x8f7fff, transparent: true, opacity: 0.5,
+  depthWrite: false, blending: THREE.AdditiveBlending,
+}));
+dust.frustumCulled = false;
+scene.add(dust);
+function scrollDust(dz) {
+  for (let i = 0; i < DUST_N; i++) {
+    dustPos[i * 3 + 2] += dz;
+    if (dustPos[i * 3 + 2] > 10) dustPos[i * 3 + 2] -= 250;
+  }
+  dustGeo.attributes.position.needsUpdate = true;
+}
+
 // ---------------------------------------------------------------- ship
 const shipFlames = [];
 const shipGlows = [];
@@ -811,7 +836,7 @@ function resetGame() {
   ship.position.y = 1.1; ship.rotation.set(0, 0, 0); ship.visible = true;
   shipShadow.visible = true; shipGlow.visible = true;
   camera.position.x = 0; camera.position.y = 6.2; camera.position.z = 11.5;
-  bank = 0; fov = 78; timeScale = 1; lastCombo = 1;
+  bank = 0; fov = 78; timeScale = 1; lastCombo = 1; bloomPulse = 0;
   spawnTimer = 0; gateTimer = 0; shake = 0; hitCooldown = 0;
   obstacles.forEach(o => { o.active = false; o.group.visible = false; });
   orbs.forEach(o => { o.active = false; o.group.visible = false; });
@@ -862,6 +887,7 @@ function crash() {
   shake = 1.2;
   timeScale = 0.2;
   caSpike = 0.0065;
+  fov = 92;                 // wide-angle cinematic punch
   audio.crash();
   audio.setThrottle(0);
   explode(ship.position);
@@ -918,8 +944,9 @@ const audio = (() => {
   const pickup = () => {
     if (muted) return; ensure();
     const t = ctx.currentTime;
-    const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(660, t);
-    o.frequency.exponentialRampToValueAtTime(1320, t + 0.12);
+    const base = 600 + Math.min(8, state.combo - 1) * 60;   // pitch rises with combo
+    const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(base, t);
+    o.frequency.exponentialRampToValueAtTime(base * 2, t + 0.12);
     const g = ctx.createGain(); g.gain.setValueAtTime(0.2, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
     o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.22);
   };
@@ -971,6 +998,7 @@ stage.addEventListener('pointerup', (e) => {
   if (state.phase !== 'playing' || dragStartX === null) return;
   const dx = e.clientX - dragStartX;
   if (Math.abs(dx) > 30) setLane(playerLane + (dx > 0 ? 1 : -1));
+  else if (Math.abs(dx) < 12) setLane(playerLane + (e.clientX < window.innerWidth / 2 ? -1 : 1)); // tap a side
   dragStartX = null;
 });
 window.addEventListener('resize', onResize);
@@ -993,6 +1021,7 @@ function startGame() {
 // ---------------------------------------------------------------- game loop
 const clock = new THREE.Clock();
 const _burstPos = new THREE.Vector3();
+const _gatePos = new THREE.Vector3();
 
 function spawnPattern() {
   const z = SPAWN_Z;
@@ -1029,7 +1058,11 @@ function animate() {
   updateBursts(rawDt);
   updateBoom(rawDt);
   caSpike = Math.max(0, caSpike - rawDt * 0.006);
+  bloomPulse = Math.max(0, bloomPulse - rawDt * 1.1);
   grade.uniforms.uCA.value = 0.0011 + caSpike;
+  // star twinkle
+  starsFar.material.opacity = 0.78 + Math.sin(t * 1.6) * 0.1;
+  starsNear.material.opacity = 0.82 + Math.sin(t * 2.4 + 1.7) * 0.12;
 
   if (state.phase === 'menu') {
     // idle attract mode: slow drift + scroll so the scene feels alive
@@ -1039,6 +1072,7 @@ function animate() {
     mountainsNear.scroll(mz);
     scrollPylons(mz);
     scrollStreaks(mz, 12);
+    scrollDust(mz * 0.5);
     for (const g of gates) {
       if (!g.active) continue;
       g.z += mz;
@@ -1066,7 +1100,7 @@ function animate() {
     camera.lookAt(ship.position.x * 0.6, 1.6, -20);
     camera.rotateZ(lerp(bank, Math.sin(now * 0.0005) * 0.04, 0.04));
     if (Math.abs(camera.fov - 78) > 0.01) { camera.fov = 78; camera.updateProjectionMatrix(); }
-    bloom.strength = 0.85;
+    bloom.strength = 0.85 + bloomPulse;
   }
 
   if (state.phase === 'playing') {
@@ -1081,9 +1115,7 @@ function animate() {
     mountainsNear.scroll(dz);
     scrollPylons(dz);
     scrollStreaks(dz, state.speed);
-    sun.position.z += dz * 0.02; if (sun.position.z > -100) sun.position.z = -560;
-    sunGlow.position.z = sun.position.z;
-    sunRefl.position.z = sun.position.z + 20;
+    scrollDust(dz * 0.5);
     for (let i = 0; i < starsNearPos.count; i++) {
       starsNearPos.array[i * 3 + 2] += dz * 0.35;
       if (starsNearPos.array[i * 3 + 2] > 20) starsNearPos.array[i * 3 + 2] -= 320;
@@ -1139,6 +1171,11 @@ function animate() {
       const c = 0.55 + 0.45 * Math.sin(t * 3.2 + g.z * 0.06);
       g.stripL.color.setRGB(0.05 * c, 0.95 * c, c);
       g.stripR.color.setRGB(0.05 * c, 0.95 * c, c);
+      // soft ring flash as the ship passes under the arch
+      if (g.z - dz <= -1.5 && g.z > -1.5) {
+        _gatePos.set(ship.position.x, 1.1, 0.5);
+        spawnBurst(_gatePos, 0x00e5ff, 2.6, 0.35);
+      }
       if (g.z > KILL_Z) { g.active = false; g.group.visible = false; }
     }
 
