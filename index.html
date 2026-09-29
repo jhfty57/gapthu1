@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>NOVA RUSH — 3D Neon Runner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden; background: #05010d;
+    font-family: 'Rajdhani', sans-serif; color: #fff;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent; touch-action: none;
+  }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  /* ---------- HUD ---------- */
+  #hud {
+    position: fixed; inset: 0; pointer-events: none; z-index: 5;
+    padding: 20px; display: flex; flex-direction: column; justify-content: flex-start;
+    opacity: 0; transition: opacity .6s ease;
+  }
+  #hud.show { opacity: 1; }
+  .hud-top { display: flex; justify-content: space-between; align-items: flex-start; width: 100%; }
+  .stat {
+    display: flex; flex-direction: column; line-height: 1;
+    background: rgba(10,3,32,.42); border: 1px solid rgba(150,120,255,.22);
+    border-radius: 14px; padding: 12px 18px 13px;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 0 18px rgba(80,20,180,.28), inset 0 0 14px rgba(120,60,255,.08);
+  }
+  .stat .label {
+    font-family: 'Orbitron', sans-serif; font-size: 11px; letter-spacing: 3px;
+    color: rgba(255,255,255,.55); text-transform: uppercase; margin-bottom: 7px;
+  }
+  #score { font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: clamp(30px, 6vw, 54px);
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 18px rgba(255,45,240,.9), 0 0 40px rgba(0,229,255,.5); }
+  .stat.right { align-items: flex-end; }
+  #speed { font-family: 'Orbitron', sans-serif; font-weight: 700; font-size: clamp(22px, 3.4vw, 34px);
+    color: #7df4ff; text-shadow: 0 0 14px rgba(0,229,255,.8); font-variant-numeric: tabular-nums; }
+  .speed-bar { width: 96px; height: 4px; border-radius: 2px; background: rgba(255,255,255,.12); margin-top: 9px; overflow: hidden; }
+  #speed-fill { display: block; height: 100%; width: 0%; border-radius: 2px;
+    background: linear-gradient(90deg, #00e5ff, #ff2df0);
+    box-shadow: 0 0 8px rgba(0,229,255,.8); transition: width .2s ease; }
+  #combo { font-family: 'Orbitron', sans-serif; font-weight: 700; font-size: clamp(15px,2.4vw,22px);
+    margin-top: 10px; color: #ffd23d; text-shadow: 0 0 12px rgba(255,210,61,.9);
+    transform: scale(.8); opacity: 0; transition: transform .15s, opacity .2s; }
+  #combo.on { transform: scale(1); opacity: 1; }
+  .muted-btn {
+    pointer-events: auto; position: absolute; bottom: 20px; left: 20px; width: 46px; height: 46px; border-radius: 12px;
+    background: rgba(10,3,32,.42); border: 1px solid rgba(150,120,255,.22);
+    color: #fff; font-size: 20px; display: grid; place-items: center; cursor: pointer;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    transition: transform .12s ease, border-color .2s;
+  }
+  .muted-btn:hover { transform: scale(1.06); border-color: rgba(0,229,255,.6); }
+
+  /* ---------- floating score popups ---------- */
+  #pops { position: fixed; inset: 0; pointer-events: none; z-index: 6; overflow: hidden; }
+  .pop {
+    position: absolute; transform: translate(-50%, -50%);
+    font-family: 'Orbitron', sans-serif; font-weight: 700; font-size: 20px;
+    text-shadow: 0 0 10px currentColor, 0 0 24px currentColor; white-space: nowrap;
+    animation: popFloat .8s cubic-bezier(.2,.7,.3,1) forwards;
+  }
+  @keyframes popFloat {
+    0%   { opacity: 0; transform: translate(-50%, -30%) scale(.6); }
+    18%  { opacity: 1; transform: translate(-50%, -65%) scale(1.15); }
+    100% { opacity: 0; transform: translate(-50%, -200%) scale(1); }
+  }
+
+  /* ---------- crash flash ---------- */
+  #flash {
+    position: fixed; inset: 0; z-index: 8; pointer-events: none; opacity: 0;
+    background: radial-gradient(circle at 50% 55%,
+      rgba(255,140,160,.55) 0%, rgba(255,45,120,.3) 32%,
+      rgba(120,10,70,.2) 58%, transparent 75%);
+    transition: opacity .55s ease;
+  }
+  #flash.on { opacity: 1; transition: opacity .05s ease; }
+
+  /* ---------- Overlays ---------- */
+  .overlay {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; text-align: center; z-index: 10; padding: 20px;
+    transition: opacity .5s ease, visibility .5s ease;
+  }
+  .overlay.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+
+  #menu .title {
+    font-family: 'Orbitron', sans-serif; font-weight: 900;
+    font-size: clamp(44px, 11vw, 120px); letter-spacing: 4px; line-height: 1;
+    background: linear-gradient(180deg, #7df4ff 0%, #a06bff 45%, #ff2df0 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 0 22px rgba(255,45,240,.55)) drop-shadow(0 0 46px rgba(0,229,255,.35));
+    animation: floaty 5s ease-in-out infinite;
+  }
+  #menu .sub {
+    margin-top: 10px; font-size: clamp(14px,2.4vw,20px); letter-spacing: 5px;
+    text-transform: uppercase; color: #b9a7ff;
+  }
+  #menu .best {
+    margin-top: 26px; font-family: 'Orbitron', sans-serif; font-weight: 700;
+    font-size: clamp(15px, 2.6vw, 21px); letter-spacing: 3px; color: #ffd23d;
+    text-shadow: 0 0 14px rgba(255,210,61,.8);
+  }
+  #menu .best .lbl { color: rgba(255,255,255,.55); font-size: .72em; letter-spacing: 4px; }
+  .btn {
+    pointer-events: auto; margin-top: 40px; padding: 16px 44px; cursor: pointer;
+    font-family: 'Orbitron', sans-serif; font-weight: 700; font-size: 18px; letter-spacing: 3px;
+    color: #fff; background: linear-gradient(90deg, #7d3bff, #ff2df0);
+    border: none; border-radius: 999px; box-shadow: 0 0 24px rgba(255,45,240,.7), inset 0 0 20px rgba(255,255,255,.25);
+    transition: transform .15s ease, box-shadow .2s ease;
+    text-transform: uppercase;
+  }
+  .btn:hover { transform: scale(1.05); box-shadow: 0 0 40px rgba(255,45,240,.9), inset 0 0 20px rgba(255,255,255,.35); }
+  .btn:active { transform: scale(.98); }
+  .hint { margin-top: 38px; font-size: 15px; letter-spacing: 2px; color: rgba(255,255,255,.7); }
+  .keys { display: flex; gap: 14px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
+  .k {
+    font-family: 'Orbitron', sans-serif; font-size: 12px; letter-spacing: 1px; color: #fff;
+    padding: 8px 12px; border: 1px solid rgba(255,255,255,.25); border-radius: 8px;
+    background: rgba(255,255,255,.05); min-width: 42px;
+  }
+  span .arrow { font-size: 15px; }
+  .tagline { position: absolute; bottom: 22px; font-size: 12px; letter-spacing: 3px; color: rgba(255,255,255,.35); }
+
+  #gameover { background: radial-gradient(ellipse at center, rgba(20,2,40,.78) 0%, rgba(5,1,13,.92) 70%); }
+  #gameover .title {
+    font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: clamp(40px,9vw,90px);
+    color: #ff4b6b; text-shadow: 0 0 30px rgba(255,59,92,.8); letter-spacing: 4px;
+  }
+  .final { margin-top: 18px; display: flex; gap: 42px; }
+  .final .box {
+    display: flex; flex-direction: column; align-items: center;
+    background: rgba(10,3,32,.42); border: 1px solid rgba(150,120,255,.22);
+    border-radius: 16px; padding: 16px 30px 18px;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  }
+  .final .box .l { font-family:'Orbitron'; font-size: 12px; letter-spacing: 3px; color: rgba(255,255,255,.55); text-transform: uppercase; }
+  .final .box .v { font-family:'Orbitron'; font-weight: 900; font-size: clamp(30px,5vw,48px); margin-top: 6px; }
+  #final-score { color: #7df4ff; text-shadow: 0 0 18px rgba(0,229,255,.7); }
+  #final-best { color: #ffd23d; text-shadow: 0 0 18px rgba(255,210,61,.7); }
+  .newbest { margin-top: 14px; font-family:'Orbitron'; font-weight:700; font-size:16px; letter-spacing:3px; color:#2dff8a;
+    text-shadow:0 0 16px rgba(45,255,138,.8); animation: pulse 1.2s ease-in-out infinite; display:none; }
+  .newbest.on { display:block; }
+
+  @keyframes floaty { 0%,100%{ transform: translateY(0);} 50%{ transform: translateY(-10px);} }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.35;} }
+</style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- floating score popups + crash flash -->
+  <div id="pops"></div>
+  <div id="flash"></div>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div class="hud-top">
+      <div class="stat"><span class="label">Score</span><span id="score">0</span></div>
+      <div class="stat right">
+        <span class="label">Speed</span>
+        <span id="speed">0</span>
+        <div class="speed-bar"><i id="speed-fill"></i></div>
+        <span id="combo">COMBO x1</span>
+      </div>
+    </div>
+    <button class="muted-btn" id="mute" title="Toggle sound">🔊</button>
+  </div>
+
+  <!-- Menu -->
+  <div class="overlay" id="menu">
+    <div class="title">NOVA RUSH</div>
+    <div class="sub">Neon · 3D · Runner · Remastered</div>
+    <div class="best"><span class="lbl">BEST</span> &nbsp;·&nbsp; <span id="menu-best-v">0</span></div>
+    <button class="btn" id="start">▶ Start</button>
+    <div class="hint">Slide to dodge the cores — grab the orbs</div>
+    <div class="keys">
+      <span class="k">◀</span><span class="k">▶</span><span class="k">A</span><span class="k">D</span>
+    </div>
+    <div class="tagline">CINEMATIC GRADE · PARALLAX DEPTH · LIGHT-SPEED STREAKS</div>
+  </div>
+
+  <!-- Game over -->
+  <div class="overlay hidden" id="gameover">
+    <div class="title">WRECKED</div>
+    <div class="final">
+      <div class="box"><span class="l">Score</span><span class="v" id="final-score">0</span></div>
+      <div class="box"><span class="l">Best</span><span class="v" id="final-best">0</span></div>
+    </div>
+    <div class="newbest" id="newbest">★ NEW BEST ★</div>
+    <button class="btn" id="restart">↻ Retry</button>
+    <div class="hint">or press SPACE</div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three.module.js"
+    }
+  }
+  </script>
+  <script type="module" src="./game.js"></script>
+</body>
+</html>

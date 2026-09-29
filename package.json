@@ -1,0 +1,9 @@
+{
+  "name": "nova-rush",
+  "version": "1.0.0",
+  "description": "NOVA RUSH — a 3D neon endless runner built with Three.js",
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "serve": "python3 -m http.server 8000"
+  }
+}
